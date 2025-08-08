@@ -88,7 +88,7 @@ ls -la ~/.ssh/id_ed25519*
 ### 1. Clone the Repository
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/AnisDh25/DevSecOps-Project.git
 cd k8s_cluster
 ```
 
@@ -626,7 +626,7 @@ Contributions are welcome! Please follow these guidelines:
 
 ```bash
 # Clone your fork
-git clone https://github.com/your-username/k8s-cluster.git
+git clone https://github.com/AnisDh25/DevSecOps-Project.git
 cd k8s-cluster
 
 # Install pre-commit hooks (optional)
