@@ -1,0 +1,95 @@
+---
+- name: Setup Kubernetes Control Plane
+  hosts: k8s_control_plane
+  become: yes
+  gather_facts: false
+  vars:
+    pod_network_cidr: "10.244.0.0/16"
+    
+  tasks:
+    - name: Pull Kubernetes images
+      shell: kubeadm config images pull
+      become: yes
+
+    - name: Initialize Kubernetes cluster
+      shell: kubeadm init --pod-network-cidr={{ pod_network_cidr }}
+      become: yes
+      register: kubeadm_output
+
+    - name: Create .kube directory for ubuntu user
+      file:
+        path: /home/ubuntu/.kube
+        state: directory
+        owner: ubuntu
+        group: ubuntu
+        mode: '0755'
+
+    - name: Copy kubeconfig for ubuntu user
+      copy:
+        src: /etc/kubernetes/admin.conf
+        dest: /home/ubuntu/.kube/config
+        owner: ubuntu
+        group: ubuntu
+        mode: '0644'
+        remote_src: yes
+
+    - name: Create .kube directory for root
+      file:
+        path: /root/.kube
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Copy kubeconfig for root
+      copy:
+        src: /etc/kubernetes/admin.conf
+        dest: /root/.kube/config
+        owner: root
+        group: root
+        mode: '0644'
+        remote_src: yes
+
+    - name: Add kubectl alias to bashrc
+      lineinfile:
+        path: /etc/bash.bashrc
+        line: 'alias k="kubectl"'
+        create: yes
+
+    - name: Install Flannel CNI
+      shell: kubectl apply -f https://raw.githubusercontent.com/flannel-io/flannel/master/Documentation/kube-flannel.yml
+      become_user: ubuntu
+      environment:
+        KUBECONFIG: /home/ubuntu/.kube/config
+
+    - name: Generate join command
+      shell: kubeadm token create --print-join-command
+      become: yes
+      register: join_command
+
+    - name: Save join command to file
+      copy:
+        content: "{{ join_command.stdout }}"
+        dest: /tmp/k8s_join_command.sh
+        mode: '0755'
+
+    - name: Fetch join command to localhost
+      fetch:
+        src: /tmp/k8s_join_command.sh
+        dest: /tmp/k8s_join_command.sh
+        flat: yes
+
+    - name: Display cluster info
+      shell: kubectl cluster-info
+      become_user: ubuntu
+      environment:
+        KUBECONFIG: /home/ubuntu/.kube/config
+      register: cluster_info
+
+    - name: Show cluster information
+      debug:
+        var: cluster_info.stdout_lines
+
+    - name: Display join command
+      debug:
+        msg: "Join command for worker nodes: {{ join_command.stdout }}"

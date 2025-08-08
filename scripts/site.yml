@@ -1,0 +1,17 @@
+---
+- name: Setup Kubernetes Cluster
+  hosts: localhost
+  gather_facts: false
+  vars:
+    cluster_name: "k8s-cluster"
+    pod_network_cidr: "10.244.0.0/16"
+  
+  tasks:
+    - name: Display cluster setup information
+      debug:
+        msg: "Starting Kubernetes cluster setup for {{ cluster_name }}"
+
+- import_playbook: prepare-nodes.yml
+- import_playbook: setup-control-plane.yml
+- import_playbook: setup-workers.yml
+- import_playbook: verify-cluster.yml

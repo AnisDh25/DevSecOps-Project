@@ -1,0 +1,10 @@
+# Ansible Requirements
+# Install with: ansible-galaxy install -r requirements.yml
+
+collections:
+  - name: community.general
+    version: ">=3.0.0"
+  - name: ansible.posix
+    version: ">=1.0.0"
+  - name: community.crypto
+    version: ">=1.0.0"

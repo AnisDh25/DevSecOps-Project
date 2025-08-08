@@ -1,0 +1,90 @@
+---
+- name: Verify Kubernetes Cluster
+  hosts: k8s_control_plane
+  become_user: ubuntu
+  gather_facts: false
+  
+  tasks:
+    - name: Wait for all nodes to be ready
+      shell: kubectl get nodes --no-headers | grep -v Ready | wc -l
+      environment:
+        KUBECONFIG: /home/ubuntu/.kube/config
+      register: not_ready_nodes
+      until: not_ready_nodes.stdout | int == 0
+      retries: 30
+      delay: 10
+
+    - name: Get cluster info
+      shell: kubectl cluster-info
+      environment:
+        KUBECONFIG: /home/ubuntu/.kube/config
+      register: cluster_info
+
+    - name: Get nodes status
+      shell: kubectl get nodes -o wide
+      environment:
+        KUBECONFIG: /home/ubuntu/.kube/config
+      register: nodes_status
+
+    - name: Get pods status
+      shell: kubectl get pods -A -o wide
+      environment:
+        KUBECONFIG: /home/ubuntu/.kube/config
+      register: pods_status
+
+    - name: Get services
+      shell: kubectl get svc -A
+      environment:
+        KUBECONFIG: /home/ubuntu/.kube/config
+      register: services_status
+
+    - name: Display cluster verification results
+      debug:
+        msg: |
+          ================================
+          KUBERNETES CLUSTER VERIFICATION
+          ================================
+          
+          CLUSTER INFO:
+          {{ cluster_info.stdout }}
+          
+          NODES STATUS:
+          {{ nodes_status.stdout }}
+          
+          PODS STATUS:
+          {{ pods_status.stdout }}
+          
+          SERVICES:
+          {{ services_status.stdout }}
+          
+          ================================
+          Cluster setup completed successfully!
+          ================================
+
+    - name: Create cluster status summary
+      copy:
+        content: |
+          Kubernetes Cluster Setup Summary
+          ================================
+          Cluster Name: k8s-cluster
+          Setup Date: {{ ansible_date_time.date }}
+          Setup Time: {{ ansible_date_time.time }}
+          
+          Cluster Info:
+          {{ cluster_info.stdout }}
+          
+          Nodes:
+          {{ nodes_status.stdout }}
+          
+          All pods:
+          {{ pods_status.stdout }}
+        dest: /home/ubuntu/cluster-setup-summary.txt
+        owner: ubuntu
+        group: ubuntu
+        mode: '0644'
+
+    - name: Fetch cluster summary to localhost
+      fetch:
+        src: /home/ubuntu/cluster-setup-summary.txt
+        dest: ./cluster-setup-summary.txt
+        flat: yes

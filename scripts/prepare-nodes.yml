@@ -1,0 +1,177 @@
+---
+- name: Prepare all Kubernetes nodes
+  hosts: k8s_cluster
+  become: yes
+  gather_facts: true
+  
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install required packages
+      apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+          - ufw
+          - jq
+        state: present
+
+    - name: Configure UFW for control plane nodes
+      ufw:
+        rule: allow
+        port: "{{ item }}"
+        proto: tcp
+      loop:
+        - "6443"
+        - "2379:2380"
+        - "10250"
+        - "10259"
+        - "10257"
+      when: inventory_hostname in groups['k8s_control_plane']
+
+    - name: Configure UFW for worker nodes
+      ufw:
+        rule: allow
+        port: "{{ item.port }}"
+        proto: "{{ item.proto }}"
+      loop:
+        - { port: "10250", proto: "tcp" }
+        - { port: "10256", proto: "tcp" }
+        - { port: "30000:32767", proto: "tcp" }
+        - { port: "8472", proto: "udp" }
+      when: inventory_hostname in groups['k8s_workers']
+
+    - name: Enable UFW
+      ufw:
+        state: enabled
+
+    - name: Disable swap
+      shell: |
+        swapoff -a
+        sed -i 's/^swap/#swap/' /etc/fstab
+      become: yes
+
+    - name: Load kernel modules
+      copy:
+        content: |
+          overlay
+          br_netfilter
+        dest: /etc/modules-load.d/kubernetes.conf
+        mode: '0644'
+
+    - name: Load overlay module
+      modprobe:
+        name: overlay
+
+    - name: Load br_netfilter module
+      modprobe:
+        name: br_netfilter
+
+    - name: Configure kernel parameters
+      copy:
+        content: |
+          net.bridge.bridge-nf-call-ip6tables = 1
+          net.bridge.bridge-nf-call-iptables = 1
+          net.ipv4.ip_forward = 1
+        dest: /etc/sysctl.d/kubernetes.conf
+        mode: '0644'
+
+    - name: Apply sysctl settings
+      shell: sysctl --system
+
+    - name: Create keyrings directory
+      file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
+
+    - name: Add Docker GPG key
+      get_url:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        dest: /tmp/docker.gpg
+        mode: '0644'
+
+    - name: Convert and install Docker GPG key
+      shell: |
+        gpg --dearmor < /tmp/docker.gpg > /etc/apt/trusted.gpg.d/docker-keyring.gpg
+        chmod 644 /etc/apt/trusted.gpg.d/docker-keyring.gpg
+        rm -f /tmp/docker.gpg
+
+    - name: Add Docker repository
+      apt_repository:
+        repo: "deb https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+        state: present
+        update_cache: yes
+
+    - name: Install containerd
+      apt:
+        name: containerd.io
+        state: present
+
+    - name: Configure containerd
+      shell: |
+        containerd config default | \
+        sed 's/SystemdCgroup = false/SystemdCgroup = true/' > /etc/containerd/config.toml
+      become: yes
+
+    - name: Restart containerd
+      systemd:
+        name: containerd
+        state: restarted
+        enabled: yes
+
+    - name: Get Kubernetes version
+      uri:
+        url: https://api.github.com/repos/kubernetes/kubernetes/releases/latest
+        return_content: yes
+      register: k8s_release
+      delegate_to: localhost
+      run_once: true
+      become: no
+
+    - name: Set Kubernetes version
+      set_fact:
+        k8s_version: "{{ (k8s_release.json.tag_name | regex_replace('v([0-9]+\\.[0-9]+)\\..*', '\\1')) }}"
+      become: no
+
+    - name: Add Kubernetes GPG key
+      get_url:
+        url: "https://pkgs.k8s.io/core:/stable:/v{{ k8s_version }}/deb/Release.key"
+        dest: /tmp/kubernetes.gpg
+        mode: '0644'
+
+    - name: Convert and install Kubernetes GPG key
+      shell: |
+        gpg --dearmor < /tmp/kubernetes.gpg > /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+        chmod 644 /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+        rm -f /tmp/kubernetes.gpg
+
+    - name: Add Kubernetes repository
+      apt_repository:
+        repo: "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v{{ k8s_version }}/deb/ /"
+        state: present
+        filename: kubernetes
+        update_cache: yes
+
+    - name: Install Kubernetes components
+      apt:
+        name:
+          - kubelet
+          - kubeadm
+          - kubectl
+        state: present
+
+    - name: Hold Kubernetes packages
+      dpkg_selections:
+        name: "{{ item }}"
+        selection: hold
+      loop:
+        - kubelet
+        - kubeadm
+        - kubectl
